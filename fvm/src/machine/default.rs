@@ -7,12 +7,8 @@ use cid::Cid;
 use fvm_ipld_amt::Amt;
 use fvm_ipld_blockstore::{Block, Blockstore, Buffered};
 use fvm_ipld_encoding::{to_vec, CborStore, DAG_CBOR};
-use fvm_shared::address::Address;
-use fvm_shared::econ::TokenAmount;
-use fvm_shared::error::ErrorNumber;
 use fvm_shared::event::StampedEvent;
 use fvm_shared::version::NetworkVersion;
-use fvm_shared::ActorID;
 use log::debug;
 use multihash::Code::Blake2b256;
 
@@ -24,9 +20,9 @@ use crate::init_actor::State as InitActorState;
 use crate::kernel::{ClassifyResult, Result};
 use crate::machine::limiter::DefaultMemoryLimiter;
 use crate::machine::Manifest;
-use crate::state_tree::{ActorState, StateTree};
+use crate::state_tree::StateTree;
 use crate::system_actor::State as SystemActorState;
-use crate::{syscall_error, EMPTY_ARR_CID};
+use crate::EMPTY_ARR_CID;
 
 pub const EVENTS_AMT_BITWIDTH: u32 = 5;
 
@@ -184,57 +180,6 @@ where
         let root = self.state_tree_mut().flush()?;
         self.blockstore().flush(&root).or_fatal()?;
         Ok(root)
-    }
-
-    /// Creates an uninitialized actor.
-    fn create_actor(&mut self, addr: &Address, act: ActorState) -> Result<ActorID> {
-        let state_tree = self.state_tree_mut();
-
-        let addr_id = state_tree.register_new_address(addr)?;
-
-        state_tree.set_actor(addr_id, act)?;
-        Ok(addr_id)
-    }
-
-    fn transfer(&mut self, from: ActorID, to: ActorID, value: &TokenAmount) -> Result<()> {
-        if value.is_negative() {
-            return Err(syscall_error!(IllegalArgument;
-                "attempted to transfer negative transfer value {}", value)
-            .into());
-        }
-
-        // If the from actor doesn't exist, we return "insufficient funds" to distinguish between
-        // that and the case where the _receiving_ actor doesn't exist.
-        let mut from_actor = self
-            .state_tree
-            .get_actor(from)?
-            .context("cannot transfer from non-existent sender")
-            .or_error(ErrorNumber::InsufficientFunds)?;
-
-        if &from_actor.balance < value {
-            return Err(syscall_error!(InsufficientFunds; "sender does not have funds to transfer (balance {}, transfer {})", &from_actor.balance, value).into());
-        }
-
-        if from == to {
-            debug!("attempting to self-transfer: noop (from/to: {})", from);
-            return Ok(());
-        }
-
-        let mut to_actor = self
-            .state_tree
-            .get_actor(to)?
-            .context("cannot transfer to non-existent receiver")
-            .or_error(ErrorNumber::NotFound)?;
-
-        from_actor.deduct_funds(value)?;
-        to_actor.deposit_funds(value);
-
-        self.state_tree.set_actor(from, from_actor)?;
-        self.state_tree.set_actor(to, to_actor)?;
-
-        log::trace!("transferred {} from {} to {}", value, from, to);
-
-        Ok(())
     }
 
     fn commit_events(&self, events: &[StampedEvent]) -> Result<Option<Cid>> {

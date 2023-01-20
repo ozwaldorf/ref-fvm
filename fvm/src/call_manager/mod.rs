@@ -10,7 +10,7 @@ use crate::engine::Engine;
 use crate::gas::{Gas, GasCharge, GasTimer, GasTracker, PriceList};
 use crate::kernel::{self, Result};
 use crate::machine::{Machine, MachineContext};
-use crate::state_tree::StateTree;
+use crate::state_tree::ActorState;
 use crate::Kernel;
 
 pub mod backtrace;
@@ -110,6 +110,24 @@ pub trait CallManager: 'static {
         delegated_address: Option<Address>,
     ) -> Result<()>;
 
+    /// Resolve an address into an actor ID.
+    fn resolve_address(&self, address: &Address) -> Result<Option<ActorID>>;
+
+    /// Get an actor.
+    fn get_actor(&self, id: ActorID) -> Result<Option<ActorState>>;
+
+    /// Update an actor.
+    fn update_actor(&mut self, id: ActorID, state: ActorState) -> Result<()>;
+
+    /// Delete an actor.
+    fn delete_actor(&mut self, id: ActorID) -> Result<()>;
+
+    /// Transfers tokens from one actor to another.
+    fn transfer(&mut self, from: ActorID, to: ActorID, value: &TokenAmount) -> Result<()>;
+
+    /// The call stack is currently in "read-only" mode. All state mutations will fail.
+    fn is_read_only(&self) -> bool;
+
     /// Getter for message nonce.
     fn nonce(&self) -> u64;
 
@@ -134,16 +152,6 @@ pub trait CallManager: 'static {
     /// Returns the externs.
     fn externs(&self) -> &<Self::Machine as Machine>::Externs {
         self.machine().externs()
-    }
-
-    /// Returns the state tree.
-    fn state_tree(&self) -> &StateTree<<Self::Machine as Machine>::Blockstore> {
-        self.machine().state_tree()
-    }
-
-    /// Returns a mutable state-tree.
-    fn state_tree_mut(&mut self) -> &mut StateTree<<Self::Machine as Machine>::Blockstore> {
-        self.machine_mut().state_tree_mut()
     }
 
     /// Charge gas.
